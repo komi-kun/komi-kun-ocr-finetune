@@ -1,0 +1,26 @@
+komi-kun OCR fine-tune
+Copyright 2026 komi-kun contributors
+
+This repository's tooling — the scripts, configs and documentation under
+scripts/, configs/ and the top-level Markdown files — is licensed under the
+Apache License, Version 2.0 (see LICENSE).
+
+The model weights published from this repository
+(ppocrv6_small_rec_manga_real.onnx, tag ocr-manga-v2) are fine-tuned from the
+Apache-2.0 PP-OCRv6-small recogniser released by PaddlePaddle/PaddleOCR, and
+are distributed under the same licence.
+
+This project's model was trained using the Manga109-s dataset (Aizawa-Yamakata-Matsui Laboratory, The University of Tokyo). Manga109-s images are not redistributed. See models/MODEL_CARD.md for citations.
+
+The onomatopoeia annotations used to build the training crops come from COO
+(Comic Onomatopoeia Dataset for Recognizing Arbitrary or Truncated Texts,
+Baek et al., ECCV 2022), which is licensed under Creative Commons
+Attribution 4.0 International (CC BY 4.0). COO onomatopoeia annotations
+(Baek et al., ECCV 2022) are CC BY 4.0.
+
+Synthetic training images were rendered from SIL Open Font License fonts and
+a corpus derived from Japanese Wikipedia (CC BY-SA); neither the fonts nor the
+rendered images are redistributed here.
+
+No manga page images, crops, dataset archives or training checkpoints are
+included in this repository or in its release artifacts.

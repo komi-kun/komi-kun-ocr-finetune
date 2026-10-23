@@ -1,0 +1,38 @@
+# Python 3.12. Paddle is NOT installed from here: the GPU wheel lives on Paddle's
+# own index (Blackwell/sm_120 needs the cu129 build):
+#
+#   uv pip install "paddlepaddle-gpu==3.4.0" \
+#     --index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/ \
+#     --extra-index-url https://pypi.org/simple --index-strategy unsafe-best-match
+#
+# Export needs an older Paddle (3.3.1) because paddle2onnx 2.1.0 cannot read
+# Paddle 3.4's PIR graph:
+#
+#   uv venv --python 3.12 .venv-export
+#   uv pip install --python .venv-export/bin/python paddlepaddle==3.3.1 \
+#     paddle2onnx==2.1.0 "onnx<=1.17.0" onnxruntime onnx-graphsurgeon sympy \
+#     -r PaddleOCR/requirements.txt
+#
+# PaddleOCR itself is cloned, not vendored:
+#   git clone --depth 1 https://github.com/PaddlePaddle/PaddleOCR
+
+numpy
+opencv-python
+pillow
+datasets
+rapidfuzz
+tqdm
+pyyaml
+shapely
+pyclipper
+requests
+packaging
+albumentations
+albucore
+scikit-image
+lmdb
+onnx<=1.17.0
+onnxruntime
+paddle2onnx==2.1.0
+onnx-graphsurgeon
+sympy

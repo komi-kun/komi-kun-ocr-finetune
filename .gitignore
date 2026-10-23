@@ -1,0 +1,30 @@
+# Virtualenvs
+.venv*/
+venv/
+
+# Vendored / upstream checkouts (training framework, downloaded sets)
+PaddleOCR/
+
+# Datasets: Manga109-s images and every crop/manifest derived from them.
+# Academically licensed, must never be redistributed.
+data/
+
+# Training output: checkpoints, logs, exports
+output/
+
+# Synthetic-corpus assets (OFL fonts + rendered images) and eval fonts
+fonts/
+fonts_eval/
+
+# Model weights are published as GitHub release assets, not committed.
+# The model card and the release manifests stay tracked.
+models/*.onnx
+models/*.pdparams
+models/*.pdopt
+models/*.pth
+
+# Python noise
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
