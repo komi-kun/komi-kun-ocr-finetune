@@ -137,8 +137,8 @@ attribution is [`models/MODEL_CARD.md`](models/MODEL_CARD.md).
 * **Long lines.** The runtime clamps the recogniser input to 320 px wide at 48 px
   high; the pipeline evaluates with the same clamp, so numbers are comparable to
   on-device behaviour.
-* **Licensing.** This workspace is tooling + weights derived from CC-BY
-  annotations and academically-licensed images; the resulting weights are meant
-  for this fork's personal use. Do not redistribute Manga109 page images.
+* **Licensing.** The weights are published (Apache-2.0) with the Manga109-s
+  attribution required by its licence; the page images themselves are never
+  redistributed. See `models/MODEL_CARD.md` and `NOTICE`.
 * **Fonts** are OFL and are not redistributed in the app; synthetic images are
   generated locally and also not committed.
