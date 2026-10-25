@@ -1,0 +1,224 @@
+# PP-OCRv6_small_det fine-tune on manga: COO onomatopoeia polygons (curved SFX)
+# + MangaOCR SFX boxes as positives, block-level dialogue as ### ignore regions.
+#
+# Derived from PaddleOCR/configs/det/PP-OCRv6/PP-OCRv6_small_det.yml.  Only the
+# data plumbing, the schedule, the device batch and the eval-time geometry
+# differ; the Architecture / Loss / Optimizer sections are stock.
+#
+# Dataset: data/det/{train,val,test}.txt (scripts/build_det_dataset.py, repo-relative
+# image paths, so data_dir is the repo root and training runs from the repo root).
+#
+#   PYTHONPATH="$PWD/PaddleOCR:$PWD" .venv/bin/python PaddleOCR/tools/train.py \
+#       -c configs/manga_det.yml
+#
+# Or through the helper, which derives run-specific configs (Flips, epochs,
+# save dir, label lists, resume):
+#
+#   bash scripts/train_det.sh --tag full --epochs 40
+#
+# Rationale for the non-stock values (all measured on val, never test):
+#   * batch_size_per_card 8: measured on the target 16 GB RTX 5070 Ti - batch 16
+#     peaks at 15.5 GB and OOMs with a desktop session resident, batch 8 peaks at
+#     8.6 GB reserved. The stock 8 is per card of an 8-GPU job (effective 64), so
+#     the schedule is shortened to ~40 epochs instead of 500.
+#   * learning_rate 5e-4: half the stock 1e-3, roughly sqrt scaling for the 1/8
+#     effective batch (8 vs 64) on a 40-epoch fine-tune instead of 500 epochs
+#     from scratch.
+#   * eval_batch_epoch 1: evaluate val every epoch and keep best_accuracy by
+#     hmean; 333 val pages make one pass cheap.
+#   * Eval DetResizeForTest limit 960 / max + PostProcess 0.15/0.25/1.40: the
+#     runtime convention (app defaults and scripts/db_det.py), so val hmean is
+#     comparable to the det metrics scripts/eval_det.py reports.
+#
+# Everything else - CopyPaste, IaaAugment (Fliplr p=0.5, Affine +-45, Resize
+# 0.1-2), RandomCrop 640, MakeBorderMap/MakeShrinkMap 0.4 - is stock.
+
+Global:
+  model_name: PP-OCRv6_small_det
+  debug: false
+  use_gpu: true
+  use_ema: true
+  ema_decay: 0.9997
+  ema_decay_type: threshold
+  epoch_num: &epoch_num 40
+  log_smooth_window: 20
+  print_batch_step: 20
+  save_model_dir: ./output/det_manga
+  save_epoch_step: 10
+  eval_batch_step:
+  - 0
+  - 1
+  eval_batch_epoch: 1
+  cal_metric_during_train: false
+  checkpoints: null
+  pretrained_model: ./models/PP-OCRv6_small_det_pretrained.pdparams
+  save_inference_dir: ./output/det_manga/inference
+  use_visualdl: false
+  infer_img: ./data/raw/Manga109-s/Manga109s_released_2026_05_21/images/ARMS/002.jpg
+  save_res_path: ./output/det_manga/predicts_db.txt
+  d2s_train_image_shape: [3, 640, 640]
+  distributed: false
+  seed: 1024
+  print_mem_info: true
+
+Architecture:
+  model_type: det
+  algorithm: DB
+  Transform: null
+  Backbone:
+    name: PPLCNetV4
+    det: true
+    model_size: small
+  Neck:
+    name: RepLKFPN
+    out_channels: 96
+    dilated_kernel_size: 7
+    shortcut: true
+  Head:
+    name: DBHead
+    k: 50
+    fix_nan: true
+    aux_in_channels: 96
+
+Loss:
+  name: DBLoss
+  main_loss_type: DiceFocalLoss
+  alpha: 5
+  beta: 10
+  focal_alpha: 0.25
+  focal_gamma: 2.5
+  aux_weight_p4: 0.2
+  aux_weight_p3: 0.3
+  aux_weight_p2: 0.4
+
+Optimizer:
+  name: Adam
+  beta1: 0.9
+  beta2: 0.999
+  lr:
+    name: Cosine
+    learning_rate: 0.0005
+    warmup_epoch: 2
+  regularizer:
+    name: L2
+    factor: 1.0e-05
+
+PostProcess:
+  name: DBPostProcess
+  thresh: 0.15
+  box_thresh: 0.25
+  max_candidates: 3000
+  unclip_ratio: 1.4
+
+Metric:
+  name: DetMetric
+  main_indicator: hmean
+
+Train:
+  dataset:
+    name: SimpleDataSet
+    data_dir: ./
+    label_file_list:
+      - ./data/det/train.txt
+    ratio_list: [1.0]
+    transforms:
+    - DecodeImage:
+        img_mode: BGR
+        channel_first: false
+    - DetLabelEncode: null
+    - CopyPaste: null
+    - IaaAugment:
+        augmenter_args:
+        - type: Fliplr
+          args:
+            p: 0.5
+        - type: Affine
+          args:
+            p: 0.5
+            rotate:
+            - -45
+            - 45
+            fit_output: true
+        - type: Resize
+          args:
+            size:
+            - 0.1
+            - 2
+    - RandomCrop:
+        size:
+        - 640
+        - 640
+        max_tries: 50
+        keep_ratio: true
+    - MakeBorderMap:
+        shrink_ratio: 0.4
+        thresh_min: 0.3
+        thresh_max: 0.7
+        total_epoch: *epoch_num
+    - MakeShrinkMap:
+        shrink_ratio: 0.4
+        min_text_size: 8
+        total_epoch: *epoch_num
+    - NormalizeImage:
+        scale: 1./255.
+        mean:
+        - 0.485
+        - 0.456
+        - 0.406
+        std:
+        - 0.229
+        - 0.224
+        - 0.225
+        order: hwc
+    - ToCHWImage: null
+    - KeepKeys:
+        keep_keys:
+        - image
+        - threshold_map
+        - threshold_mask
+        - shrink_map
+        - shrink_mask
+  loader:
+    shuffle: true
+    drop_last: false
+    batch_size_per_card: 8
+    num_workers: 8
+
+Eval:
+  dataset:
+    name: SimpleDataSet
+    data_dir: ./
+    label_file_list:
+      - ./data/det/val.txt
+    transforms:
+    - DecodeImage:
+        img_mode: BGR
+        channel_first: false
+    - DetLabelEncode: null
+    - DetResizeForTest:
+        limit_side_len: 960
+        limit_type: max
+    - NormalizeImage:
+        scale: 1./255.
+        mean:
+        - 0.485
+        - 0.456
+        - 0.406
+        std:
+        - 0.229
+        - 0.224
+        - 0.225
+        order: hwc
+    - ToCHWImage: null
+    - KeepKeys:
+        keep_keys:
+        - image
+        - shape
+        - polys
+        - ignore_tags
+  loader:
+    shuffle: false
+    drop_last: false
+    batch_size_per_card: 1
+    num_workers: 2
+profiler_options: null

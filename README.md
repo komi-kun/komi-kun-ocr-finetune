@@ -68,6 +68,88 @@ screentone vs dark-art background, blur, rotation ±2.5°, noise and JPEG qualit
 The generator deliberately **holds out four display fonts** (`RampartOne`,
 `PottaOne`, `TrainOne`, `ZenAntique`) to produce a leakage-free validation set.
 
+### 2.3 Detector dataset (COO polygons + MangaOCR)
+
+`scripts/build_det_dataset.py` builds PaddleOCR `SimpleDataSet` labels for the
+*detector* (DB), so curved onomatopoeia stop being split into pieces.
+
+**MangaOCR has no line-level dialogue GT.** Its `bbox_2d` instances are the
+Manga109 `<text>` blocks — whole bubbles of 2–4 columns, even where one MangaOCR
+box maps 1:1 to one block (checked by rendering them). Training DB on them as
+positives would teach merging, so the two roles differ by split:
+
+| | train | val / test |
+|---|---|---|
+| COO polygons (4–66 points, `class=sfx`) | positive | positive |
+| MangaOCR SFX boxes | positive | positive |
+| MangaOCR dialogue boxes (block-level) | **`###` ignore region** | positive GT |
+
+| | |
+|---|---|
+| Source A | COO `annotations_COO/<book>.xml` polygons, **4–66 points**, kept as polygons |
+| Source B | `hal-utokyo/MangaOCR` `bbox_2d` → four-point boxes (`class=dialogue` / `sfx`) |
+| Alignment | MangaOCR `id = <book>_<page>` against Manga109-s `images/<book>/<page>.jpg` |
+| De-dupe | MangaOCR box dropped when it is the same SFX as a COO polygon: polygon-vs-box IoU > 0.5, or (only without dialogue evidence) the box covers > 50 % of the polygon; COO wins. 48,278 boxes dropped, 99.4 % of the pairs agree on the transcription |
+| Class tags | `dialogue` when the box is a Manga109 `<text>` instance (IoU > 0.5) or merges ≥ 2 of them, else `sfx` |
+| Ignore regions | train: block-level dialogue only, trimmed off the SFX GT (subtract → hole-free fragments, tolerance 1 %); a box swallowed by SFX is dropped, not ignored over it |
+| Split | the exact `build_real_dataset.book_split()` books: 74 / 4 / 9 of 87 (73 train after the exclusion below) |
+
+Outputs (`data/det/`, git-ignored): `{train,val,test}.txt` (8,053 page lines /
+154,018 instances: train 39,391 positives + 87,908 `###` ignores, val 7,401,
+test 19,318), `{train,val,test}.jsonl` (sidecar: book, page, `class`, `source`,
+`role`, `granularity`, match evidence — enough for per-class eval), `stats.json`,
+`mangaocr_boxes.jsonl` cache.
+
+```bash
+python scripts/build_det_dataset.py                # build data/det/*
+python scripts/build_det_dataset.py --self-test    # rule-level assertions
+python scripts/build_det_dataset.py --validate-only  # re-check the outputs (exit 1 on failure)
+python scripts/build_det_dataset.py --overlay 8 --overlay-out /tmp/det_overlays
+```
+
+Consequences for measurement and training (all reported in `stats.json` and
+printed by `--validate-only`):
+
+* **Dialogue detection metrics are block/bubble-level**, not line-level: 87,759
+  train and 17,005 eval dialogue instances are Manga109 blocks (93,463 of the
+  104,764 match exactly one block at IoU > 0.5, 11,290 merge ≥ 2). Report them
+  together with an end-to-end block CER (`scripts/eval_blocks.py`), which is the
+  metric that actually reflects what the app reads.
+* Train has **no positive dialogue label**: dialogue regions are excluded from the
+  DB loss, so the fine-tune cannot learn to merge *or* to suppress them; dialogue
+  behaviour is inherited from the pretrained detector. `--train-dialogue positive`
+  restores the old (unsafe) behaviour for comparison only. **This is experiment 1
+  and it is rejected** (dialogue block coverage 92.10 → 25.99 % on test): see below.
+* `PrayerHaNemurenai` (a train book) is annotated by MangaOCR on a ~2× larger
+  canvas (1,238 of 1,745 boxes fall outside the Manga109-s page), so it is
+  excluded from the detector dataset rather than mislabelled.
+
+### 2.4 Dialogue-preserving detector (experiment 2, shipped)
+
+`scripts/build_det_pseudo_dataset.py` writes a **second** dataset, `data/det_pseudo/`,
+that keeps `data/det/` intact and fixes the missing supervision instead of
+retreating from it: it replays the stock detector over every train page and keeps
+its **line quads** as dialogue positives where ≥ 80 % of a quad's area lies inside
+a MangaOCR dialogue region, clipped to (region − SFX). The rest of each dialogue
+region becomes hole-free `###` ignore fragments, so no ignore can cancel a
+positive.
+
+These are **teacher labels, not ground truth** — they encode "keep doing what the
+shipped detector does", and the evaluator's independent GT is untouched. Two
+consequences to keep in mind: dialogue quality is now capped by the stock
+detector, and any error the stock detector makes inside a bubble becomes a
+training target. val/test still use `data/det/{val,test}` with their own labels.
+
+```bash
+python scripts/build_det_pseudo_dataset.py                     # writes data/det_pseudo/*
+python scripts/build_det_pseudo_dataset.py --self-test         # rule-level assertions
+```
+
+Result on held-out test: SFX H 32.78 → 65.03 %, SFX crop recall 32.07 → 69.91 %,
+dialogue block coverage 92.10 → **94.94 %** (no collapse this time), art false
+positives 5.35 → 1.35 per page, paired block CER −1.03 pp. Full tables in
+`RESULTS.md` §"Experiment 2".
+
 ## 3. Pipeline
 
 ```bash
@@ -79,6 +161,9 @@ uv pip install -r requirements.txt            # see file for the paddle index ur
 python scripts/fetch_manga109.py --repo hal-utokyo/Manga109-s
 git clone https://github.com/manga109/public-annotations data/raw/COO-public
 python scripts/build_real_dataset.py --coo data/raw/COO-public/COO-Comic-Onomatopoeia/v2022.07.07
+
+# 1b. detector labels (COO polygons + MangaOCR boxes, page-aligned; see §2.3)
+python scripts/build_det_dataset.py
 
 # 2. synthetic data
 python scripts/make_corpus.py --n-wiki 40000
@@ -99,7 +184,8 @@ Training recipe: PP-OCRv6_small_rec config (PPLCNetV4-small backbone, LightSVTR
 neck, CTC+NRTR multi-head) initialised from the official
 `PP-OCRv6_small_rec_pretrained.pdparams`; Adam, cosine LR 2e-4, warmup 2 epochs,
 batch 128, MultiScaleSampler `[320×32, 320×48, 320×64]`, RecAug + RecConAug.
-Only the recogniser is fine-tuned — the detector is unchanged.
+Only the recogniser is fine-tuned in this step — the detector is unchanged
+*here*; §2.4 fine-tunes it separately.
 
 ## 4. Results
 
@@ -130,6 +216,22 @@ Full tables, caveats, artifact hash and the Paddle↔ONNX agreement check are in
 attribution is [`models/MODEL_CARD.md`](models/MODEL_CARD.md).
 
 ## 5. Notes
+
+* **What ships.** Two immutable releases on `komi-kun/komi-kun-ocr-models`:
+  [`ocr-manga-v3`](https://github.com/komi-kun/komi-kun-ocr-models/releases/tag/ocr-manga-v3)
+  (curved-SFX detector + fine-tuned recogniser + dict, 9 929 569 B / 21 159 418 B /
+  74 947 B) and
+  [`ocr-models-v4`](https://github.com/komi-kun/komi-kun-ocr-models/releases/tag/ocr-models-v4)
+  (the same detector + stock recogniser + the unchanged native `.so`s). Detector
+  sha256 `bf5ed74a…f01677`, recogniser `3e898ae2…03467a5d`, dict `b5f2bfe2…401c5d`.
+  Every manifest entry carries an explicit flat `path`; `models/manifest.ocr-manga-v3.json`
+  and `models/manifest.ocr-models-v4.json` are tracked copies of the published ones.
+* **Curved SFX are detected, not yet read.** The detector now puts one tight
+  quadrilateral on a curved onomatopoeia instead of splitting it (9+-point recall
+  27.5 → 74.0 %), but the recogniser is still handed the `minAreaRect`
+  *rectangular* crop, so a strong arc is not unwarped. A polygon→straight-strip
+  unwarp in the native shim is the remaining prerequisite, and the polygon the
+  detector already emits is its input.
 
 * **Dictionary is frozen.** Training uses `models/ppocrv6_small_dict.txt`
   verbatim (identical to PaddleOCR's `ppocrv6_dict.txt`), so the exported ONNX
