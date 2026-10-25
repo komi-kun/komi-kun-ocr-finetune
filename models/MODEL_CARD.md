@@ -29,9 +29,42 @@ MultiScaleSampler `[320×32, 320×48, 320×64]`, RecAug + RecConAug, CTC+NRTR lo
 
 ## Evaluation
 
-See `RESULTS.md`. Held-out books, block-level (end-to-end): CER 28.05 % → **25.45 %**,
+See `RESULTS.md` §"Released combinations" for the four shipping releases head to
+head. Held-out Manga109-s books, recogniser only (stock detector, i.e.
+`ocr-models-v3` → `ocr-manga-v2`): block-level end-to-end CER 28.05 % → **25.45 %**,
 exact 38.42 % → **43.63 %**. Line-level SFX CER 77.56 % → **17.12 %**, dialogue
 8.73 % → **6.51 %**. General Japanese text 3.98 % → 0.53 % CER.
+
+## Released combinations — this recogniser vs stock, with and without the new detector
+
+Four release tags on `komi-kun/komi-kun-ocr-models`, four (detector, recogniser)
+pairs, all on the same held-out test split (9 books, never trained on, never used
+for selection). `komi-kun/komi-kun-ocr-finetune` publishes no releases.
+
+| Release | Detector | Recogniser |
+|---|---|---|
+| `ocr-models-v3` (previous stock) | stock `d73e0058…` | stock `5435fd74…` |
+| `ocr-manga-v2` (previous fine-tune) | stock `d73e0058…` | **this** recogniser `3e898ae2…` |
+| `ocr-models-v4` (new stock-rec) | fine-tuned `bf5ed74a…` | stock `5435fd74…` |
+| `ocr-manga-v3` (new fine-tune) | fine-tuned `bf5ed74a…` | **this** recogniser `3e898ae2…` |
+
+**Recogniser quality, detector held fixed**
+(`ocr-models-v3` → `ocr-manga-v2`): Manga109 dialogue block CER 28.05 → 25.45 %
+(exact 38.42 → 43.63 %), and on the COO onomatopoeia end-to-end CER 91.37 →
+75.53 % with 246 → 1 120 SFX read character-for-character.
+
+**Detector quality, recogniser held fixed** (`ocr-manga-v2` → `ocr-manga-v3`):
+COO SFX found 32.07 → 69.91 %, dialogue block coverage 92.10 → 94.94 %, art false
+positives 5.35 → 1.35 per page, and end-to-end (COO SFX) CER **75.53 → 51.38 %**
+with exact **1 120 → 2 453**; Manga109 dialogue block CER 27.95 → 26.92 % and
+exact 43.72 → 45.64 % on the same 12 945 blocks. Every paired change is
+significant (binomial p < 1e-4); nothing regresses.
+
+The recogniser alone fixes *reading* but not *finding* (4 510 of 6 639 held-out
+SFX still get no detection), and the detector alone fixes *finding* but not
+*reading* (SFX CER only 91.37 → 86.64 % with the stock recogniser). The pair is
+what makes curved and straight onomatopoeia actually readable; the numbers are in
+`RESULTS.md` §"Released combinations".
 
 ## Intended use / limits
 
@@ -61,8 +94,9 @@ dialogue supervision distilled from the shipped (stock) detector, because
 MangaOCR provides block-level dialogue boxes only. Held-out test (9 books,
 982 pages): SFX H 32.78 → **65.03 %**, SFX crop recall 32.07 → **69.91 %**,
 dialogue block coverage 92.10 → **94.94 %**, art false positives 5.35 → **1.35**
-per page; end to end the paired block CER improves by 1.03 pp. Full tables in
-`RESULTS.md` §"Experiment 2".
+per page; end to end, COO SFX CER 75.53 → **51.38 %** and exact 1 120 → **2 453**
+over the previous fine-tune release, with the paired dialogue block CER improving
+by 1.03 pp (12 945 blocks). Full tables in `RESULTS.md` §"Experiment 2".
 
 **Limit that remains:** the runtime still hands this recogniser the `minAreaRect`
 *rectangular* crop of a detected SFX, so a strongly curved onomatopoeia is boxed

@@ -189,8 +189,11 @@ Only the recogniser is fine-tuned in this step — the detector is unchanged
 
 ## 4. Results
 
-Real Manga109-s, held out **by book** (9 test books, 969 pages, 13,083 blocks).
-`base` = shipped model, `stage-1` = synthetic only, `stage-2` = synthetic + real.
+Real Manga109-s, held out **by book** (9 test books, 13 083 readable blocks).
+`base` = shipped model, `stage-1` = synthetic only, `stage-2` = synthetic + real
+(stage-2 is what ships, in `ocr-manga-v2` / `ocr-manga-v3`).
+
+### 4.1 Recogniser file (stage-2 vs base)
 
 Page level (det + crop + rec; no teacher selection):
 
@@ -211,9 +214,70 @@ Line level (recogniser only):
 Synthetic-only training helped SFX but *hurt* real dialogue; the real-data stage
 is the one to ship. General Japanese text also improves (3.98 % → 0.53 % CER).
 
-Full tables, caveats, artifact hash and the Paddle↔ONNX agreement check are in
-[`RESULTS.md`](RESULTS.md); the model card with the required Manga109-s
-attribution is [`models/MODEL_CARD.md`](models/MODEL_CARD.md).
+### 4.2 The four shipping releases, compared
+
+Four tags on `komi-kun/komi-kun-ocr-models`, four (detector, recogniser) pairs.
+`komi-kun/komi-kun-ocr-finetune` (this repo) publishes **no** releases. The
+dictionary is byte-identical in all four.
+
+| Release | Detector | Recogniser | Role |
+|---|---|---|---|
+| `ocr-models-v3` | stock `d73e0058…` | stock `5435fd74…` | previous **stock** — baseline |
+| `ocr-manga-v2` | stock `d73e0058…` | FT `3e898ae2…` | previous **fine-tune** (rec only) |
+| `ocr-models-v4` | FT `bf5ed74a…` | stock `5435fd74…` | new **stock-rec** (FT detector) |
+| `ocr-manga-v3` | FT `bf5ed74a…` | FT `3e898ae2…` | new **fine-tune** (both) |
+
+Same held-out test split for all three axes (9 books; 982 pages for the detector,
+6 639 COO onomatopoeia and 12 209 dialogue blocks for the end-to-end runs).
+
+**Detector metrics** (`scripts/eval_det.py`, polygon IoU):
+
+| metric | stock det (`ocr-models-v3`, `ocr-manga-v2`) | FT det (`ocr-models-v4`, `ocr-manga-v3`) |
+|---|---|---|
+| SFX P / R / H @0.5 | 49.62 / 24.48 / 32.78 % | **70.50 / 60.36 / 65.03 %** |
+| SFX crop recall @0.4 | 32.07 % (2 129) | **69.91 % (4 641)** |
+| — 4-point | 34.80 % | **67.57 %** |
+| — 5–8-point | 30.43 % | **71.26 %** |
+| — 9+-point (curved) | 27.49 % | **73.97 %** |
+| dialogue block coverage ≥50 % | 92.10 % | **94.94 %** |
+| art false positives / page | 5.35 | **1.35** |
+
+**End-to-end COO SFX recognition** (`scripts/eval_sfx.py` — detector, crop and
+recogniser on the 6 639 held-out COO onomatopoeia; a missed SFX is scored as a
+full deletion, so this is the reader-visible error):
+
+| Release | SFX found | end-to-end CER | read exactly | matched-only CER |
+|---|---|---|---|---|
+| `ocr-models-v3` | 32.07 % | 91.37 % | 3.71 % (246) | 75.69 % |
+| `ocr-manga-v2` | 32.07 % | 75.53 % | 16.87 % (1 120) | **31.05 %** |
+| `ocr-models-v4` | 69.94 % | 86.64 % | 5.95 % (395) | 81.82 % |
+| `ocr-manga-v3` | **69.94 %** | **51.38 %** | **36.95 % (2 453)** | 33.86 % |
+
+By GT complexity (end-to-end CER): 4-point 87.13 → 68.73 → 81.07 → **43.69 %**,
+5–8-point 93.12 → 77.46 → 88.60 → **51.76 %**, 9+-point curved 95.89 → 84.93 →
+93.39 → **66.50 %** (same release order as above).
+
+**End-to-end Manga109 dialogue blocks** (`scripts/eval_blocks.py`; `ocr-manga-v2`
+→ `ocr-manga-v3` paired on the same 12 945 blocks is −1.03 pp CER / +1.92 pp
+exact, exact flips 530 fixed vs 281 broken, p < 1e-4):
+
+| Release | blocks read / 13 868 | block CER | block exact | paired CER / exact (12 945) |
+|---|---|---|---|---|
+| `ocr-models-v3` | 13 083 | 28.05 % | 38.42 % | 29.76 % / 38.51 % |
+| `ocr-manga-v2` | 13 083 | 25.45 % | 43.63 % | 27.95 % / 43.72 % |
+| `ocr-models-v4` | 13 523 | 28.42 % | 39.88 % | 28.54 % / 41.07 % |
+| `ocr-manga-v3` | **13 523** | 26.16 % | **44.48 %** | **26.92 % / 45.64 %** |
+
+Reading the two end-to-end tables together: the recogniser fixes *reading* but not
+*finding* (4 510 of 6 639 SFX are still undetected in `ocr-manga-v2`), the
+detector fixes *finding* but not *reading* (SFX CER only 91.37 → 86.64 % with the
+stock recogniser), and only the pair makes onomatopoeia actually readable. Every
+paired change is significant (binomial p < 1e-4) and nothing regresses.
+
+Full tables, per-bucket breakdowns, the reproduce commands and the caveats are in
+[`RESULTS.md`](RESULTS.md) §"Released combinations"; the model card with the
+required Manga109-s attribution is [`models/MODEL_CARD.md`](models/MODEL_CARD.md).
+
 
 ## 5. Notes
 
@@ -226,12 +290,22 @@ attribution is [`models/MODEL_CARD.md`](models/MODEL_CARD.md).
   sha256 `bf5ed74a…f01677`, recogniser `3e898ae2…03467a5d`, dict `b5f2bfe2…401c5d`.
   Every manifest entry carries an explicit flat `path`; `models/manifest.ocr-manga-v3.json`
   and `models/manifest.ocr-models-v4.json` are tracked copies of the published ones.
-* **Curved SFX are detected, not yet read.** The detector now puts one tight
-  quadrilateral on a curved onomatopoeia instead of splitting it (9+-point recall
-  27.5 → 74.0 %), but the recogniser is still handed the `minAreaRect`
-  *rectangular* crop, so a strong arc is not unwarped. A polygon→straight-strip
-  unwarp in the native shim is the remaining prerequisite, and the polygon the
-  detector already emits is its input.
+  The two they supersede — `ocr-models-v3` (stock) and `ocr-manga-v2` (recogniser
+  only) — stay published and are the baselines in §4.2, so each release is
+  attributable to exactly one changed model file.
+* **Curved SFX are read, but not unwarped.** The detector now puts one tight
+  quadrilateral on a curved onomatopoeia instead of splitting it (9+-point crop
+  recall 27.49 → 73.97 %), and with the fine-tuned recogniser that class goes from
+  84.93 % to **66.50 %** end-to-end CER over `ocr-manga-v2`. What is still left on
+  the table is the crop: the recogniser is handed the `minAreaRect`
+  *rectangular* region, so a strong arc is straightened by axis-aligned cropping.
+  A polygon→straight-strip unwarp in the native shim is the remaining
+  prerequisite, and the polygon the detector already emits is its input.
+* **Two evaluation axes for SFX.** `scripts/eval_blocks.py` scores Manga109
+  `<text>` dialogue blocks; the detector fine-tune targets COO onomatopoeia, which
+  is why `scripts/eval_sfx.py` exists — it runs det → crop → rec on the COO
+  polygons and scores a missed SFX as a full deletion. Quote both; a detector gain
+  shows up as recall in the former and as CER in the latter.
 
 * **Dictionary is frozen.** Training uses `models/ppocrv6_small_dict.txt`
   verbatim (identical to PaddleOCR's `ppocrv6_dict.txt`), so the exported ONNX
