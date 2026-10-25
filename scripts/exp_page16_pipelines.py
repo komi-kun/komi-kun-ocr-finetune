@@ -39,6 +39,7 @@ from eval_line_level import FT, STOCK  # noqa: E402
 EXP1 = ROOT / "models/ppocrv6_small_det_manga.onnx"  # experiment-1 detector (rejected)
 
 # The lower-right bubble on the regression page, raw-page pixels. Column 1 is the RIGHTMOST column.
+# Labels are opaque placeholders; the recognised text is reported separately.
 BUBBLE = (2560, 4930, 3340, 5850)
 COLUMNS = {
     1: ("col1", 3130, 3300),
